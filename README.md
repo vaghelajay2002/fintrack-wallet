@@ -1,6 +1,6 @@
 # FinTrack Wallet
 
-FinTrack Wallet is a freelance-ready Java + React + Docker portfolio project. It is a demo wallet and expense tracker with JWT auth, wallet balance, credit/debit transactions, recent history, PostgreSQL persistence, and explicit LLD patterns.
+FinTrack Wallet is a freelance-ready Java + React + Docker portfolio project. It is a demo wallet and expense tracker with JWT auth, wallet balance, credit/debit transactions, search, transaction editing, PostgreSQL persistence, and explicit LLD patterns.
 
 ## Tech Stack
 
@@ -38,6 +38,7 @@ POST /api/auth/register
 POST /api/auth/login
 GET  /api/wallet
 POST /api/wallet/transactions
+PUT  /api/wallet/transactions/{transactionId}
 ```
 
 ## Sample Transaction Request

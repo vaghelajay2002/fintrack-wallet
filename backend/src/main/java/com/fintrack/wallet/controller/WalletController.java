@@ -7,7 +7,9 @@ import com.fintrack.wallet.service.WalletService;
 import jakarta.validation.Valid;
 import java.security.Principal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,5 +34,14 @@ public class WalletController {
             @Valid @RequestBody TransactionRequest request
     ) {
         return walletService.createTransaction(principal, request);
+    }
+
+    @PutMapping("/transactions/{transactionId}")
+    TransactionResponse updateTransaction(
+            Principal principal,
+            @PathVariable Long transactionId,
+            @Valid @RequestBody TransactionRequest request
+    ) {
+        return walletService.updateTransaction(principal, transactionId, request);
     }
 }

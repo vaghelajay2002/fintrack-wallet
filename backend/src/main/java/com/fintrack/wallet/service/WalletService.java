@@ -10,6 +10,7 @@ import com.fintrack.wallet.pattern.factory.TransactionFactory;
 import com.fintrack.wallet.pattern.strategy.TransactionStrategyRegistry;
 import com.fintrack.wallet.repository.TransactionRepository;
 import com.fintrack.wallet.repository.WalletRepository;
+import java.math.BigDecimal;
 import java.security.Principal;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -38,7 +39,7 @@ public class WalletService {
     public WalletSummaryResponse summary(Principal principal) {
         Wallet wallet = findWallet(principal.getName());
         List<TransactionResponse> transactions = transactionRepository
-                .findTop25ByWalletUserEmailOrderByCreatedAtDesc(principal.getName())
+                .findTop100ByWalletUserEmailOrderByCreatedAtDesc(principal.getName())
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -58,6 +59,38 @@ public class WalletService {
         );
         walletRepository.save(wallet);
         return toResponse(transactionRepository.save(transaction));
+    }
+
+    @Transactional
+    public TransactionResponse updateTransaction(Principal principal, Long transactionId, TransactionRequest request) {
+        Transaction transaction = transactionRepository.findById(transactionId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Transaction not found"));
+
+        Wallet wallet = transaction.getWallet();
+        if (!wallet.getUser().getEmail().equals(principal.getName())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "You cannot edit this transaction");
+        }
+
+        BigDecimal recalculatedBalance = wallet.getBalance()
+                .subtract(balanceImpact(transaction.getType(), transaction.getAmount()))
+                .add(balanceImpact(request.type(), request.amount()));
+
+        wallet.setBalance(recalculatedBalance);
+        transaction.setType(request.type());
+        transaction.setAmount(request.amount());
+        transaction.setCategory(blankToDefault(request.category(), request.type().name()));
+        transaction.setNote(blankToDefault(request.note(), "Wallet transaction"));
+
+        walletRepository.save(wallet);
+        return toResponse(transactionRepository.save(transaction));
+    }
+
+    private BigDecimal balanceImpact(com.fintrack.wallet.domain.TransactionType type, BigDecimal amount) {
+        return type == com.fintrack.wallet.domain.TransactionType.CREDIT ? amount : amount.negate();
+    }
+
+    private String blankToDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
     }
 
     private Wallet findWallet(String email) {

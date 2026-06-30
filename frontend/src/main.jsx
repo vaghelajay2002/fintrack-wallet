@@ -1,15 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowDownCircle, ArrowUpCircle, LogOut, Plus, WalletCards } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Edit3, LogOut, Plus, Search, WalletCards, X } from 'lucide-react';
 import { api } from './services/api';
 import './styles.css';
+
+const emptyTransaction = { type: 'CREDIT', amount: '', category: '', note: '' };
+const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+const quickCategories = ['Salary', 'Food', 'Travel', 'Shopping', 'Bills', 'Freelance'];
 
 function App() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('fintrack-session') || 'null'));
   const [mode, setMode] = useState('login');
   const [authForm, setAuthForm] = useState({ fullName: '', email: '', password: '' });
   const [wallet, setWallet] = useState({ balance: 0, recentTransactions: [] });
-  const [transaction, setTransaction] = useState({ type: 'CREDIT', amount: '', category: '', note: '' });
+  const [transaction, setTransaction] = useState(emptyTransaction);
+  const [editingId, setEditingId] = useState(null);
+  const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
 
   const token = session?.token;
@@ -31,6 +37,20 @@ function App() {
       { credit: 0, debit: 0 }
     );
   }, [wallet.recentTransactions]);
+
+  const filteredTransactions = useMemo(() => {
+    const term = search.toLowerCase().trim();
+    if (!term) {
+      return wallet.recentTransactions;
+    }
+
+    return wallet.recentTransactions.filter((item) => {
+      return [item.type, item.category, item.note, String(item.amount)]
+        .join(' ')
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [search, wallet.recentTransactions]);
 
   async function loadWallet(jwt = token) {
     const data = await api('/wallet', { token: jwt });
@@ -57,16 +77,35 @@ function App() {
     event.preventDefault();
     setMessage('');
     try {
-      await api('/wallet/transactions', {
-        method: 'POST',
+      const path = editingId ? `/wallet/transactions/${editingId}` : '/wallet/transactions';
+      await api(path, {
+        method: editingId ? 'PUT' : 'POST',
         token,
         body: { ...transaction, amount: Number(transaction.amount) }
       });
-      setTransaction({ type: 'CREDIT', amount: '', category: '', note: '' });
+      setTransaction(emptyTransaction);
+      setEditingId(null);
       await loadWallet();
     } catch (error) {
       setMessage(error.message);
     }
+  }
+
+  function startEdit(item) {
+    setEditingId(item.id);
+    setTransaction({
+      type: item.type,
+      amount: String(item.amount),
+      category: item.category,
+      note: item.note
+    });
+    setMessage('');
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setTransaction(emptyTransaction);
+    setMessage('');
   }
 
   function logout() {
@@ -120,21 +159,24 @@ function App() {
       <section className="metrics-grid">
         <article className="metric balance">
           <span>Balance</span>
-          <strong>${Number(wallet.balance).toFixed(2)}</strong>
+          <strong>{money.format(Number(wallet.balance))}</strong>
         </article>
         <article className="metric">
           <span>Income</span>
-          <strong>${totals.credit.toFixed(2)}</strong>
+          <strong>{money.format(totals.credit)}</strong>
         </article>
         <article className="metric">
           <span>Expenses</span>
-          <strong>${totals.debit.toFixed(2)}</strong>
+          <strong>{money.format(totals.debit)}</strong>
         </article>
       </section>
 
       <section className="content-grid">
         <form className="transaction-form" onSubmit={submitTransaction}>
-          <h2>New Transaction</h2>
+          <div className="form-title">
+            <h2>{editingId ? 'Edit Transaction' : 'New Transaction'}</h2>
+            {editingId && <button className="ghost-icon" type="button" onClick={cancelEdit} title="Cancel edit"><X size={17} /></button>}
+          </div>
           <div className="type-toggle">
             <button type="button" className={transaction.type === 'CREDIT' ? 'selected' : ''} onClick={() => setTransaction({ ...transaction, type: 'CREDIT' })}>
               <ArrowDownCircle size={18} /> Credit
@@ -145,23 +187,43 @@ function App() {
           </div>
           <input placeholder="Amount" type="number" min="0.01" step="0.01" value={transaction.amount} onChange={(e) => setTransaction({ ...transaction, amount: e.target.value })} />
           <input placeholder="Category" value={transaction.category} onChange={(e) => setTransaction({ ...transaction, category: e.target.value })} />
+          <div className="chips">
+            {quickCategories.map((category) => (
+              <button key={category} type="button" onClick={() => setTransaction({ ...transaction, category })}>{category}</button>
+            ))}
+          </div>
           <input placeholder="Note" value={transaction.note} onChange={(e) => setTransaction({ ...transaction, note: e.target.value })} />
-          <button className="primary" type="submit"><Plus size={18} /> Add transaction</button>
+          <button className="primary" type="submit">
+            {editingId ? <Edit3 size={18} /> : <Plus size={18} />}
+            {editingId ? 'Save changes' : 'Add transaction'}
+          </button>
           {message && <p className="message">{message}</p>}
         </form>
 
         <section className="history">
-          <h2>Recent Transactions</h2>
+          <div className="history-head">
+            <h2>Transactions</h2>
+            <div className="search-box">
+              <Search size={17} />
+              <input placeholder="Search category, note, amount" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+          </div>
           <div className="table">
-            {wallet.recentTransactions.map((item) => (
+            {filteredTransactions.map((item) => (
               <div className="row" key={item.id}>
                 <span className={item.type === 'CREDIT' ? 'pill credit' : 'pill debit'}>{item.type}</span>
-                <span>{item.category}</span>
-                <span>{item.note}</span>
-                <strong>{item.type === 'CREDIT' ? '+' : '-'}${Number(item.amount).toFixed(2)}</strong>
+                <div>
+                  <strong>{item.category}</strong>
+                  <small>{item.note}</small>
+                </div>
+                <span>{new Date(item.createdAt).toLocaleDateString('en-IN')}</span>
+                <strong className={item.type === 'CREDIT' ? 'amount-positive' : 'amount-negative'}>
+                  {item.type === 'CREDIT' ? '+' : '-'}{money.format(Number(item.amount))}
+                </strong>
+                <button className="icon-button" onClick={() => startEdit(item)} title="Edit transaction"><Edit3 size={16} /></button>
               </div>
             ))}
-            {wallet.recentTransactions.length === 0 && <p className="empty">No transactions yet.</p>}
+            {filteredTransactions.length === 0 && <p className="empty">No transactions found.</p>}
           </div>
         </section>
       </section>

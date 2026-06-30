@@ -65,6 +65,7 @@ This keeps debit and credit rules separate and makes it easy to add new transact
 | POST | `/api/auth/login` | Login and receive JWT |
 | GET | `/api/wallet` | Get balance and recent transactions |
 | POST | `/api/wallet/transactions` | Create credit or debit transaction |
+| PUT | `/api/wallet/transactions/{transactionId}` | Edit type, amount, category, or note |
 
 ## Example Flow
 
@@ -79,7 +80,6 @@ This keeps debit and credit rules separate and makes it easy to add new transact
 ## Future Improvements
 
 - Add transfer between users.
-- Add category budgets.
 - Add monthly analytics.
 - Add CSV/PDF export.
 - Add admin dashboard.
