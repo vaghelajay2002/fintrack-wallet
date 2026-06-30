@@ -4,9 +4,13 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   BadgeIndianRupee,
+  BarChart3,
   CalendarDays,
+  CreditCard,
   Edit3,
-  Landmark,
+  History,
+  LayoutDashboard,
+  LineChart,
   LogOut,
   PieChart,
   Plus,
@@ -22,22 +26,27 @@ import './styles.css';
 
 const emptyTransaction = { type: 'CREDIT', amount: '', category: '', note: '' };
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
-const shortMoney = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0
-});
+const shortMoney = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 const quickCategories = ['Salary', 'Food', 'Travel', 'Shopping', 'Bills', 'Freelance', 'Rent', 'Investment'];
+const routes = [
+  { path: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: 'transactions', label: 'History', icon: History },
+  { path: 'credit', label: 'Credit', icon: ArrowDownCircle },
+  { path: 'debit', label: 'Debit', icon: ArrowUpCircle },
+  { path: 'analytics', label: 'Analytics', icon: BarChart3 }
+];
 const fallbackTransactions = [
   { id: 'demo-1', type: 'CREDIT', amount: 85000, category: 'Salary', note: 'Monthly income', createdAt: new Date().toISOString() },
   { id: 'demo-2', type: 'DEBIT', amount: 12000, category: 'Rent', note: 'Apartment payment', createdAt: new Date(Date.now() - 86400000).toISOString() },
   { id: 'demo-3', type: 'DEBIT', amount: 4200, category: 'Food', note: 'Weekend dining', createdAt: new Date(Date.now() - 172800000).toISOString() },
   { id: 'demo-4', type: 'DEBIT', amount: 7500, category: 'Investment', note: 'SIP deposit', createdAt: new Date(Date.now() - 259200000).toISOString() },
-  { id: 'demo-5', type: 'CREDIT', amount: 22000, category: 'Freelance', note: 'Client milestone', createdAt: new Date(Date.now() - 345600000).toISOString() }
+  { id: 'demo-5', type: 'CREDIT', amount: 22000, category: 'Freelance', note: 'Client milestone', createdAt: new Date(Date.now() - 345600000).toISOString() },
+  { id: 'demo-6', type: 'DEBIT', amount: 3100, category: 'Travel', note: 'Metro and cab rides', createdAt: new Date(Date.now() - 432000000).toISOString() }
 ];
 
 function App() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('fintrack-session') || 'null'));
+  const [route, setRoute] = useState(readRoute);
   const [mode, setMode] = useState('login');
   const [authForm, setAuthForm] = useState({ fullName: '', email: '', password: '' });
   const [wallet, setWallet] = useState({ balance: 0, recentTransactions: [] });
@@ -47,7 +56,14 @@ function App() {
   const [message, setMessage] = useState('');
 
   const token = session?.token;
-  const transactions = wallet.recentTransactions.length ? wallet.recentTransactions : fallbackTransactions;
+  const hasRealTransactions = wallet.recentTransactions.length > 0;
+  const transactions = hasRealTransactions ? wallet.recentTransactions : fallbackTransactions;
+
+  useEffect(() => {
+    const syncRoute = () => setRoute(readRoute());
+    window.addEventListener('hashchange', syncRoute);
+    return () => window.removeEventListener('hashchange', syncRoute);
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -55,33 +71,11 @@ function App() {
     }
   }, [token]);
 
-  const totals = useMemo(() => {
-    return transactions.reduce(
-      (sum, item) => {
-        const amount = Number(item.amount);
-        return item.type === 'CREDIT'
-          ? { ...sum, credit: sum.credit + amount }
-          : { ...sum, debit: sum.debit + amount };
-      },
-      { credit: 0, debit: 0 }
-    );
-  }, [transactions]);
-
+  const totals = useMemo(() => summarize(transactions), [transactions]);
   const analytics = useMemo(() => buildAnalytics(transactions, totals), [transactions, totals]);
-
-  const filteredTransactions = useMemo(() => {
-    const term = search.toLowerCase().trim();
-    if (!term) {
-      return transactions;
-    }
-
-    return transactions.filter((item) => {
-      return [item.type, item.category, item.note, String(item.amount)]
-        .join(' ')
-        .toLowerCase()
-        .includes(term);
-    });
-  }, [search, transactions]);
+  const searchedTransactions = useMemo(() => filterTransactions(transactions, search), [transactions, search]);
+  const creditTransactions = searchedTransactions.filter((item) => item.type === 'CREDIT');
+  const debitTransactions = searchedTransactions.filter((item) => item.type === 'DEBIT');
 
   async function loadWallet(jwt = token) {
     const data = await api('/wallet', { token: jwt });
@@ -93,12 +87,11 @@ function App() {
     setMessage('');
     try {
       const path = mode === 'login' ? '/auth/login' : '/auth/register';
-      const payload = mode === 'login'
-        ? { email: authForm.email, password: authForm.password }
-        : authForm;
+      const payload = mode === 'login' ? { email: authForm.email, password: authForm.password } : authForm;
       const data = await api(path, { method: 'POST', body: payload });
       localStorage.setItem('fintrack-session', JSON.stringify(data));
       setSession(data);
+      window.location.hash = '#/dashboard';
     } catch (error) {
       setMessage(error.message);
     }
@@ -127,15 +120,10 @@ function App() {
       setMessage('Create your first real transaction to edit it.');
       return;
     }
-
     setEditingId(item.id);
-    setTransaction({
-      type: item.type,
-      amount: String(item.amount),
-      category: item.category,
-      note: item.note
-    });
+    setTransaction({ type: item.type, amount: String(item.amount), category: item.category, note: item.note });
     setMessage('');
+    window.location.hash = '#/transactions';
   }
 
   function cancelEdit() {
@@ -148,220 +136,307 @@ function App() {
     localStorage.removeItem('fintrack-session');
     setSession(null);
     setWallet({ balance: 0, recentTransactions: [] });
+    window.location.hash = '#/dashboard';
   }
 
   if (!session) {
-    return (
-      <main className="auth-shell">
-        <section className="auth-panel">
-          <div className="auth-art">
-            <div className="coin coin-a">₹</div>
-            <div className="coin coin-b">₹</div>
-            <WalletCards size={46} />
-          </div>
-          <div className="brand-row auth-brand">
-            <div>
-              <h1>FinTrack Wallet</h1>
-              <p>Track money, spot patterns, correct mistakes fast.</p>
-            </div>
-          </div>
-          <div className="segmented">
-            <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button>
-            <button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Register</button>
-          </div>
-          <form onSubmit={submitAuth} className="form-grid">
-            {mode === 'register' && (
-              <input placeholder="Full name" value={authForm.fullName} onChange={(e) => setAuthForm({ ...authForm, fullName: e.target.value })} />
-            )}
-            <input placeholder="Email" type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} />
-            <input placeholder="Password" type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} />
-            <button className="primary" type="submit">{mode === 'login' ? 'Login' : 'Create account'}</button>
-          </form>
-          {message && <p className="message">{message}</p>}
-        </section>
-      </main>
-    );
+    return <AuthScreen authForm={authForm} message={message} mode={mode} setAuthForm={setAuthForm} setMode={setMode} submitAuth={submitAuth} />;
   }
+
+  const common = {
+    analytics,
+    cancelEdit,
+    creditTransactions,
+    debitTransactions,
+    editingId,
+    hasRealTransactions,
+    message,
+    search,
+    searchedTransactions,
+    setSearch,
+    setTransaction,
+    startEdit,
+    submitTransaction,
+    totals,
+    transaction,
+    transactions,
+    wallet
+  };
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-row">
-          <div className="brand-mark"><WalletCards size={24} /></div>
+      <AppHeader logout={logout} route={route} session={session} />
+      <RouteTabs route={route} />
+      {route === 'dashboard' && <DashboardView {...common} />}
+      {route === 'transactions' && <TransactionsView {...common} title="Transaction History" transactions={searchedTransactions} />}
+      {route === 'credit' && <TypeView {...common} accent="income" title="Credit Transactions" transactions={creditTransactions} type="CREDIT" />}
+      {route === 'debit' && <TypeView {...common} accent="expense" title="Debit Transactions" transactions={debitTransactions} type="DEBIT" />}
+      {route === 'analytics' && <AnalyticsView analytics={analytics} totals={totals} transactions={transactions} />}
+    </main>
+  );
+}
+
+function AuthScreen({ authForm, message, mode, setAuthForm, setMode, submitAuth }) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-art">
+          <div className="coin coin-a">₹</div>
+          <div className="coin coin-b">₹</div>
+          <WalletCards size={46} />
+        </div>
+        <div className="brand-row auth-brand">
           <div>
             <h1>FinTrack Wallet</h1>
-            <p>{session.fullName} · {session.email}</p>
+            <p>Track money, spot patterns, correct mistakes fast.</p>
           </div>
         </div>
-        <div className="top-actions">
-          <span><CalendarDays size={16} /> {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-          <button className="icon-button" onClick={logout} title="Logout"><LogOut size={18} /></button>
+        <div className="segmented">
+          <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button>
+          <button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Register</button>
         </div>
-      </header>
-
-      <section className="hero-dashboard">
-        <article className="balance-card">
-          <div className="balance-top">
-            <span><Sparkles size={16} /> Live wallet balance</span>
-            <BadgeIndianRupee size={30} />
-          </div>
-          <strong>{money.format(Number(wallet.balance || analytics.netWorth))}</strong>
-          <p>{analytics.savingsRate}% savings rate based on recent activity</p>
-          <div className="balance-wave">
-            <span style={{ height: '36%' }} />
-            <span style={{ height: '68%' }} />
-            <span style={{ height: '44%' }} />
-            <span style={{ height: '82%' }} />
-            <span style={{ height: '55%' }} />
-            <span style={{ height: '76%' }} />
-            <span style={{ height: '48%' }} />
-          </div>
-        </article>
-
-        <article className="insight-card">
-          <div className="insight-icon income"><TrendingUp size={20} /></div>
-          <span>Income</span>
-          <strong>{money.format(totals.credit)}</strong>
-          <p>{analytics.creditCount} credit entries</p>
-        </article>
-
-        <article className="insight-card">
-          <div className="insight-icon expense"><TrendingDown size={20} /></div>
-          <span>Expenses</span>
-          <strong>{money.format(totals.debit)}</strong>
-          <p>{analytics.debitCount} debit entries</p>
-        </article>
-
-        <article className="insight-card">
-          <div className="insight-icon neutral"><Landmark size={20} /></div>
-          <span>Net Flow</span>
-          <strong>{money.format(totals.credit - totals.debit)}</strong>
-          <p>{transactions.length} tracked records</p>
-        </article>
-      </section>
-
-      <section className="analytics-grid">
-        <article className="panel chart-panel">
-          <div className="panel-head">
-            <div>
-              <span>Cashflow</span>
-              <h2>Income vs Expenses</h2>
-            </div>
-            <PieChart size={22} />
-          </div>
-          <CashflowBars income={totals.credit} expense={totals.debit} />
-        </article>
-
-        <article className="panel chart-panel">
-          <div className="panel-head">
-            <div>
-              <span>Trend</span>
-              <h2>Recent Balance Movement</h2>
-            </div>
-          </div>
-          <BalanceLine points={analytics.timeline} />
-        </article>
-
-        <article className="panel chart-panel">
-          <div className="panel-head">
-            <div>
-              <span>Categories</span>
-              <h2>Top Spending Areas</h2>
-            </div>
-          </div>
-          <CategoryBars categories={analytics.categories} />
-        </article>
-      </section>
-
-      <section className="workspace-grid">
-        <form className="transaction-form panel" onSubmit={submitTransaction}>
-          <div className="form-title">
-            <div>
-              <span>Action center</span>
-              <h2>{editingId ? 'Edit Transaction' : 'New Transaction'}</h2>
-            </div>
-            {editingId && <button className="ghost-icon" type="button" onClick={cancelEdit} title="Cancel edit"><X size={17} /></button>}
-          </div>
-          <div className="type-toggle">
-            <button type="button" className={transaction.type === 'CREDIT' ? 'selected' : ''} onClick={() => setTransaction({ ...transaction, type: 'CREDIT' })}>
-              <ArrowDownCircle size={18} /> Credit
-            </button>
-            <button type="button" className={transaction.type === 'DEBIT' ? 'selected' : ''} onClick={() => setTransaction({ ...transaction, type: 'DEBIT' })}>
-              <ArrowUpCircle size={18} /> Debit
-            </button>
-          </div>
-          <input placeholder="Amount in INR" type="number" min="0.01" step="0.01" value={transaction.amount} onChange={(e) => setTransaction({ ...transaction, amount: e.target.value })} />
-          <input placeholder="Category" value={transaction.category} onChange={(e) => setTransaction({ ...transaction, category: e.target.value })} />
-          <div className="chips">
-            {quickCategories.map((category) => (
-              <button key={category} type="button" onClick={() => setTransaction({ ...transaction, category })}>{category}</button>
-            ))}
-          </div>
-          <input placeholder="Note" value={transaction.note} onChange={(e) => setTransaction({ ...transaction, note: e.target.value })} />
-          <button className="primary" type="submit">
-            {editingId ? <Edit3 size={18} /> : <Plus size={18} />}
-            {editingId ? 'Save changes' : 'Add transaction'}
-          </button>
-          {message && <p className="message">{message}</p>}
+        <form onSubmit={submitAuth} className="form-grid">
+          {mode === 'register' && (
+            <input placeholder="Full name" value={authForm.fullName} onChange={(e) => setAuthForm({ ...authForm, fullName: e.target.value })} />
+          )}
+          <input placeholder="Email" type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} />
+          <input placeholder="Password" type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} />
+          <button className="primary" type="submit">{mode === 'login' ? 'Login' : 'Create account'}</button>
         </form>
-
-        <section className="history panel">
-          <div className="history-head">
-            <div>
-              <span>Ledger</span>
-              <h2>Transactions</h2>
-            </div>
-            <div className="search-box">
-              <Search size={17} />
-              <input placeholder="Search category, note, amount" value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-          </div>
-          <div className="table">
-            {filteredTransactions.map((item, index) => (
-              <div className="row" key={item.id} style={{ animationDelay: `${index * 45}ms` }}>
-                <span className={item.type === 'CREDIT' ? 'pill credit' : 'pill debit'}>{item.type}</span>
-                <div>
-                  <strong>{item.category}</strong>
-                  <small>{item.note}</small>
-                </div>
-                <span>{new Date(item.createdAt).toLocaleDateString('en-IN')}</span>
-                <strong className={item.type === 'CREDIT' ? 'amount-positive' : 'amount-negative'}>
-                  {item.type === 'CREDIT' ? '+' : '-'}{money.format(Number(item.amount))}
-                </strong>
-                <button className="icon-button" onClick={() => startEdit(item)} title="Edit transaction"><Edit3 size={16} /></button>
-              </div>
-            ))}
-            {filteredTransactions.length === 0 && <p className="empty">No transactions found.</p>}
-          </div>
-        </section>
+        {message && <p className="message">{message}</p>}
       </section>
     </main>
   );
 }
 
-function buildAnalytics(items, totals) {
-  const creditCount = items.filter((item) => item.type === 'CREDIT').length;
-  const debitCount = items.filter((item) => item.type === 'DEBIT').length;
-  const netWorth = totals.credit - totals.debit;
-  const savingsRate = totals.credit ? Math.max(0, Math.round(((totals.credit - totals.debit) / totals.credit) * 100)) : 0;
-  const categoryMap = items
-    .filter((item) => item.type === 'DEBIT')
-    .reduce((map, item) => map.set(item.category, (map.get(item.category) || 0) + Number(item.amount)), new Map());
-  const maxCategory = Math.max(1, ...categoryMap.values());
-  const categories = Array.from(categoryMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name, value]) => ({ name, value, percent: Math.round((value / maxCategory) * 100) }));
-  let running = 0;
-  const timeline = [...items]
-    .reverse()
-    .slice(-8)
-    .map((item) => {
-      running += item.type === 'CREDIT' ? Number(item.amount) : -Number(item.amount);
-      return running;
-    });
+function AppHeader({ logout, route, session }) {
+  return (
+    <header className="topbar">
+      <div className="brand-row">
+        <div className="brand-mark"><WalletCards size={24} /></div>
+        <div>
+          <h1>FinTrack Wallet</h1>
+          <p>{session.fullName} · {session.email} · {titleForRoute(route)}</p>
+        </div>
+      </div>
+      <div className="top-actions">
+        <span><CalendarDays size={16} /> {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+        <button className="icon-button" onClick={logout} title="Logout"><LogOut size={18} /></button>
+      </div>
+    </header>
+  );
+}
 
-  return { categories, creditCount, debitCount, netWorth, savingsRate, timeline };
+function RouteTabs({ route }) {
+  return (
+    <nav className="route-tabs">
+      {routes.map((item) => {
+        const Icon = item.icon;
+        return (
+          <a className={route === item.path ? 'active' : ''} href={`#/${item.path}`} key={item.path}>
+            <Icon size={17} />
+            {item.label}
+          </a>
+        );
+      })}
+    </nav>
+  );
+}
+
+function DashboardView(props) {
+  return (
+    <>
+      <HeroMetrics analytics={props.analytics} totals={props.totals} transactions={props.transactions} wallet={props.wallet} />
+      <section className="dashboard-grid">
+        <TransactionForm {...props} />
+        <article className="panel chart-panel wide-chart">
+          <PanelHead icon={<LineChart size={22} />} kicker="Trend" title="Recent Balance Movement" />
+          <BalanceLine points={props.analytics.timeline} />
+        </article>
+        <TransactionTable search={props.search} setSearch={props.setSearch} startEdit={props.startEdit} title="Recent Activity" transactions={props.searchedTransactions.slice(0, 7)} />
+      </section>
+    </>
+  );
+}
+
+function TransactionsView(props) {
+  return (
+    <section className="workspace-grid">
+      <TransactionForm {...props} />
+      <TransactionTable search={props.search} setSearch={props.setSearch} startEdit={props.startEdit} title={props.title} transactions={props.transactions} />
+    </section>
+  );
+}
+
+function TypeView(props) {
+  const total = props.transactions.reduce((sum, item) => sum + Number(item.amount), 0);
+  return (
+    <>
+      <section className="type-hero">
+        <article className={`type-card ${props.accent}`}>
+          <span>{props.type}</span>
+          <strong>{money.format(total)}</strong>
+          <p>{props.transactions.length} matching transactions</p>
+        </article>
+        <article className="panel compact-chart">
+          <PanelHead kicker="Breakdown" title={`${props.title} by Category`} />
+          <CategoryBars categories={buildTypeCategories(props.transactions)} />
+        </article>
+      </section>
+      <TransactionsView {...props} />
+    </>
+  );
+}
+
+function AnalyticsView({ analytics, totals, transactions }) {
+  return (
+    <>
+      <HeroMetrics analytics={analytics} totals={totals} transactions={transactions} wallet={{ balance: analytics.netWorth }} />
+      <section className="analytics-lab">
+        <article className="panel chart-panel">
+          <PanelHead icon={<BarChart3 size={22} />} kicker="Bar Chart" title="Income vs Expenses" />
+          <CashflowBars income={totals.credit} expense={totals.debit} />
+        </article>
+        <article className="panel chart-panel">
+          <PanelHead icon={<LineChart size={22} />} kicker="Line Chart" title="Balance Movement" />
+          <BalanceLine points={analytics.timeline} />
+        </article>
+        <article className="panel chart-panel">
+          <PanelHead icon={<PieChart size={22} />} kicker="Pie Chart" title="Cashflow Split" />
+          <DonutChart credit={totals.credit} debit={totals.debit} />
+        </article>
+        <article className="panel chart-panel">
+          <PanelHead kicker="Horizontal Bars" title="Top Debit Categories" />
+          <CategoryBars categories={analytics.categories} />
+        </article>
+        <article className="panel chart-panel">
+          <PanelHead kicker="Column Chart" title="Last Transactions" />
+          <ColumnChart transactions={transactions.slice(0, 8).reverse()} />
+        </article>
+        <article className="panel chart-panel">
+          <PanelHead kicker="Insights" title="Portfolio Signals" />
+          <div className="signal-list">
+            <span>Savings rate <strong>{analytics.savingsRate}%</strong></span>
+            <span>Highest spend <strong>{analytics.categories[0]?.name || 'None'}</strong></span>
+            <span>Net flow <strong>{money.format(totals.credit - totals.debit)}</strong></span>
+          </div>
+        </article>
+      </section>
+    </>
+  );
+}
+
+function HeroMetrics({ analytics, totals, transactions, wallet }) {
+  return (
+    <section className="hero-dashboard">
+      <article className="balance-card">
+        <div className="balance-top">
+          <span><Sparkles size={16} /> Live wallet balance</span>
+          <BadgeIndianRupee size={30} />
+        </div>
+        <strong>{money.format(Number(wallet.balance || analytics.netWorth))}</strong>
+        <p>{analytics.savingsRate}% savings rate based on recent activity</p>
+        <div className="balance-wave">
+          {[36, 68, 44, 82, 55, 76, 48].map((height) => <span key={height} style={{ height: `${height}%` }} />)}
+        </div>
+      </article>
+      <InsightCard icon={<TrendingUp size={20} />} label="Income" tone="income" value={money.format(totals.credit)} meta={`${analytics.creditCount} credit entries`} />
+      <InsightCard icon={<TrendingDown size={20} />} label="Expenses" tone="expense" value={money.format(totals.debit)} meta={`${analytics.debitCount} debit entries`} />
+      <InsightCard icon={<CreditCard size={20} />} label="Net Flow" tone="neutral" value={money.format(totals.credit - totals.debit)} meta={`${transactions.length} tracked records`} />
+    </section>
+  );
+}
+
+function InsightCard({ icon, label, meta, tone, value }) {
+  return (
+    <article className="insight-card">
+      <div className={`insight-icon ${tone}`}>{icon}</div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <p>{meta}</p>
+    </article>
+  );
+}
+
+function TransactionForm({ cancelEdit, editingId, message, setTransaction, submitTransaction, transaction }) {
+  return (
+    <form className="transaction-form panel" onSubmit={submitTransaction}>
+      <div className="form-title">
+        <div>
+          <span>Action center</span>
+          <h2>{editingId ? 'Edit Transaction' : 'New Transaction'}</h2>
+        </div>
+        {editingId && <button className="ghost-icon" type="button" onClick={cancelEdit} title="Cancel edit"><X size={17} /></button>}
+      </div>
+      <div className="type-toggle">
+        <button type="button" className={transaction.type === 'CREDIT' ? 'selected' : ''} onClick={() => setTransaction({ ...transaction, type: 'CREDIT' })}>
+          <ArrowDownCircle size={18} /> Credit
+        </button>
+        <button type="button" className={transaction.type === 'DEBIT' ? 'selected' : ''} onClick={() => setTransaction({ ...transaction, type: 'DEBIT' })}>
+          <ArrowUpCircle size={18} /> Debit
+        </button>
+      </div>
+      <input placeholder="Amount in INR" type="number" min="0.01" step="0.01" value={transaction.amount} onChange={(e) => setTransaction({ ...transaction, amount: e.target.value })} />
+      <input placeholder="Category" value={transaction.category} onChange={(e) => setTransaction({ ...transaction, category: e.target.value })} />
+      <div className="chips">
+        {quickCategories.map((category) => (
+          <button key={category} type="button" onClick={() => setTransaction({ ...transaction, category })}>{category}</button>
+        ))}
+      </div>
+      <input placeholder="Note" value={transaction.note} onChange={(e) => setTransaction({ ...transaction, note: e.target.value })} />
+      <button className="primary" type="submit">
+        {editingId ? <Edit3 size={18} /> : <Plus size={18} />}
+        {editingId ? 'Save changes' : 'Add transaction'}
+      </button>
+      {message && <p className="message">{message}</p>}
+    </form>
+  );
+}
+
+function TransactionTable({ search, setSearch, startEdit, title, transactions }) {
+  return (
+    <section className="history panel">
+      <div className="history-head">
+        <div>
+          <span>Ledger</span>
+          <h2>{title}</h2>
+        </div>
+        <div className="search-box">
+          <Search size={17} />
+          <input placeholder="Search category, note, amount" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+      </div>
+      <div className="table">
+        {transactions.map((item, index) => (
+          <div className="row" key={item.id} style={{ animationDelay: `${index * 45}ms` }}>
+            <span className={item.type === 'CREDIT' ? 'pill credit' : 'pill debit'}>{item.type}</span>
+            <div>
+              <strong>{item.category}</strong>
+              <small>{item.note}</small>
+            </div>
+            <span>{new Date(item.createdAt).toLocaleDateString('en-IN')}</span>
+            <strong className={item.type === 'CREDIT' ? 'amount-positive' : 'amount-negative'}>
+              {item.type === 'CREDIT' ? '+' : '-'}{money.format(Number(item.amount))}
+            </strong>
+            <button className="icon-button" onClick={() => startEdit(item)} title="Edit transaction"><Edit3 size={16} /></button>
+          </div>
+        ))}
+        {transactions.length === 0 && <p className="empty">No transactions found.</p>}
+      </div>
+    </section>
+  );
+}
+
+function PanelHead({ icon, kicker, title }) {
+  return (
+    <div className="panel-head">
+      <div>
+        <span>{kicker}</span>
+        <h2>{title}</h2>
+      </div>
+      {icon}
+    </div>
+  );
 }
 
 function CashflowBars({ income, expense }) {
@@ -413,9 +488,8 @@ function BalanceLine({ points }) {
 
 function CategoryBars({ categories }) {
   if (!categories.length) {
-    return <p className="empty">Add debit transactions to unlock category insights.</p>;
+    return <p className="empty">Add transactions to unlock category insights.</p>;
   }
-
   return (
     <div className="category-bars">
       {categories.map((category) => (
@@ -429,6 +503,86 @@ function CategoryBars({ categories }) {
       ))}
     </div>
   );
+}
+
+function DonutChart({ credit, debit }) {
+  const total = Math.max(credit + debit, 1);
+  const creditSlice = (credit / total) * 100;
+  return (
+    <div className="donut-wrap">
+      <div className="donut" style={{ background: `conic-gradient(#0f766e 0 ${creditSlice}%, #df784b ${creditSlice}% 100%)` }}>
+        <span>{Math.round(creditSlice)}%</span>
+      </div>
+      <div className="legend">
+        <span><i className="legend-income" /> Credit {shortMoney.format(credit)}</span>
+        <span><i className="legend-expense" /> Debit {shortMoney.format(debit)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ColumnChart({ transactions }) {
+  const max = Math.max(1, ...transactions.map((item) => Number(item.amount)));
+  return (
+    <div className="column-chart">
+      {transactions.map((item) => (
+        <div className={item.type === 'CREDIT' ? 'column income-col' : 'column expense-col'} key={item.id} style={{ height: `${Math.max(16, (Number(item.amount) / max) * 100)}%` }}>
+          <span>{item.category}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function summarize(items) {
+  return items.reduce(
+    (sum, item) => {
+      const amount = Number(item.amount);
+      return item.type === 'CREDIT' ? { ...sum, credit: sum.credit + amount } : { ...sum, debit: sum.debit + amount };
+    },
+    { credit: 0, debit: 0 }
+  );
+}
+
+function buildAnalytics(items, totals) {
+  const creditCount = items.filter((item) => item.type === 'CREDIT').length;
+  const debitCount = items.filter((item) => item.type === 'DEBIT').length;
+  const netWorth = totals.credit - totals.debit;
+  const savingsRate = totals.credit ? Math.max(0, Math.round(((totals.credit - totals.debit) / totals.credit) * 100)) : 0;
+  const categories = buildTypeCategories(items.filter((item) => item.type === 'DEBIT'));
+  let running = 0;
+  const timeline = [...items].reverse().slice(-8).map((item) => {
+    running += item.type === 'CREDIT' ? Number(item.amount) : -Number(item.amount);
+    return running;
+  });
+
+  return { categories, creditCount, debitCount, netWorth, savingsRate, timeline };
+}
+
+function buildTypeCategories(items) {
+  const categoryMap = items.reduce((map, item) => map.set(item.category, (map.get(item.category) || 0) + Number(item.amount)), new Map());
+  const maxCategory = Math.max(1, ...categoryMap.values());
+  return Array.from(categoryMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name, value]) => ({ name, value, percent: Math.round((value / maxCategory) * 100) }));
+}
+
+function filterTransactions(items, search) {
+  const term = search.toLowerCase().trim();
+  if (!term) {
+    return items;
+  }
+  return items.filter((item) => [item.type, item.category, item.note, String(item.amount)].join(' ').toLowerCase().includes(term));
+}
+
+function readRoute() {
+  const path = window.location.hash.replace('#/', '') || 'dashboard';
+  return routes.some((item) => item.path === path) ? path : 'dashboard';
+}
+
+function titleForRoute(route) {
+  return routes.find((item) => item.path === route)?.label || 'Dashboard';
 }
 
 createRoot(document.getElementById('root')).render(<App />);
