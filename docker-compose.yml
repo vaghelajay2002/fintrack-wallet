@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fintrack-postgres
+    environment:
+      POSTGRES_DB: fintrack
+      POSTGRES_USER: fintrack
+      POSTGRES_PASSWORD: fintrack
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintrack -d fintrack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: fintrack-backend
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/fintrack
+      DB_USER: fintrack
+      DB_PASSWORD: fintrack
+      JWT_SECRET: replace-this-with-a-long-production-secret-123456
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: fintrack-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
